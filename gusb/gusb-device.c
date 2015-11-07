@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*-
  *
- * Copyright (C) 2010-2011 Richard Hughes <richard@hughsie.com>
+ * Copyright (C) 2010-2015 Richard Hughes <richard@hughsie.com>
  * Copyright (C) 2011 Hans de Goede <hdegoede@redhat.com>
  * Copyright (C) 2011 Debarshi Ray <debarshir@src.gnome.org>
  *
@@ -115,6 +115,9 @@ g_usb_device_get_property (GObject    *object,
 	case PROP_LIBUSB_DEVICE:
 		g_value_set_pointer (value, priv->device);
 		break;
+	case PROP_CONTEXT:
+		g_value_set_object (value, priv->context);
+		break;
 	default:
 		G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
 		break;
@@ -194,7 +197,7 @@ g_usb_device_class_init (GUsbDeviceClass *klass)
 		g_param_spec_object ("context", NULL, NULL,
 		                     G_USB_TYPE_CONTEXT,
 		                     G_PARAM_CONSTRUCT_ONLY|
-		                     G_PARAM_WRITABLE);
+		                     G_PARAM_READWRITE);
 
 	/**
 	 * GUsbDevice:platform-id:
@@ -475,6 +478,110 @@ g_usb_device_get_custom_index (GUsbDevice *device,
 
 	libusb_free_config_descriptor (config);
 	return idx;
+}
+
+/**
+ * g_usb_device_get_interface:
+ * @device: a #GUsbDevice
+ * @class_id: a device class, e.g. 0xff for VENDOR
+ * @subclass_id: a device subclass
+ * @protocol_id: a protocol number
+ * @error: a #GError, or %NULL
+ *
+ * Gets the interface number from the vendor class interface descriptor.
+ *
+ * Return value: an interface number, or 0xff for failure
+ *
+ * Since: 0.2.5
+ **/
+guint8
+g_usb_device_get_interface (GUsbDevice *device,
+			    guint8      class_id,
+			    guint8      subclass_id,
+			    guint8      protocol_id,
+			    GError    **error)
+{
+	const struct libusb_interface_descriptor *ifp;
+	gint rc;
+	guint8 iface_num = 0xff;
+	guint i;
+	struct libusb_config_descriptor *config;
+
+	rc = libusb_get_active_config_descriptor (device->priv->device, &config);
+	if (!g_usb_device_libusb_error_to_gerror (device, rc, error))
+		return NULL;
+
+	/* find the right data */
+	for (i = 0; i < config->bNumInterfaces; i++) {
+		ifp = &config->interface[i].altsetting[0];
+		if (ifp->bInterfaceClass != class_id)
+			continue;
+		if (ifp->bInterfaceSubClass != subclass_id)
+			continue;
+		if (ifp->bInterfaceProtocol != protocol_id)
+			continue;
+		iface_num = ifp->bInterfaceNumber;
+		break;
+	}
+
+	/* nothing matched */
+	if (iface_num == 0xff) {
+		g_set_error (error,
+			     G_USB_DEVICE_ERROR,
+			     G_USB_DEVICE_ERROR_NOT_SUPPORTED,
+			     "no interface for class 0x%02x, "
+			     "subclass 0x%02x and protocol 0x%02x",
+			     class_id, subclass_id, protocol_id);
+	}
+
+	libusb_free_config_descriptor (config);
+	return iface_num;
+}
+
+/**
+ * g_usb_device_get_interface:
+ * @device: a #GUsbDevice
+ * @iface: an interface number
+ * @error: a #GError, or %NULL
+ *
+ * Gets any extra data from the interface.
+ *
+ * Return value: (transfer full): a #GBytes, or %NULL for failure
+ *
+ * Since: 0.2.5
+ **/
+GBytes *
+g_usb_device_get_interface_data (GUsbDevice *device, guint8 iface, GError **error)
+{
+	const struct libusb_interface_descriptor *ifp;
+	gint rc;
+	guint i;
+	GBytes *bytes = NULL;
+	struct libusb_config_descriptor *config;
+
+	rc = libusb_get_active_config_descriptor (device->priv->device, &config);
+	if (!g_usb_device_libusb_error_to_gerror (device, rc, error))
+		return NULL;
+
+	/* find the right data */
+	for (i = 0; i < config->bNumInterfaces; i++) {
+		ifp = &config->interface[i].altsetting[0];
+		if (iface == ifp->bInterfaceNumber) {
+			bytes = g_bytes_new (config->extra, config->extra_length);
+			break;
+		}
+	}
+
+	/* nothing matched */
+	if (bytes == NULL) {
+		g_set_error (error,
+			     G_USB_DEVICE_ERROR,
+			     G_USB_DEVICE_ERROR_NOT_SUPPORTED,
+			     "no interface 0x%02x", iface);
+	}
+
+	libusb_free_config_descriptor (config);
+	return bytes;
 }
 
 /**

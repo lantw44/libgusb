@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*-
  *
- * Copyright (C) 2010-2011 Richard Hughes <richard@hughsie.com>
+ * Copyright (C) 2010-2015 Richard Hughes <richard@hughsie.com>
  * Copyright (C) 2011 Hans de Goede <hdegoede@redhat.com>
  *
  * Licensed under the GNU Lesser General Public License Version 2.1
@@ -172,6 +172,15 @@ guint8			 g_usb_device_get_custom_index	(GUsbDevice	*device,
 							 guint8		 class_id,
 							 guint8		 subclass_id,
 							 guint8		 protocol_id,
+							 GError		**error);
+
+guint8			 g_usb_device_get_interface	(GUsbDevice	*device,
+							 guint8		 class_id,
+							 guint8		 subclass_id,
+							 guint8		 protocol_id,
+							 GError		**error);
+GBytes			*g_usb_device_get_interface_data (GUsbDevice	*device,
+							 guint8		 iface,
 							 GError		**error);
 
 gboolean		 g_usb_device_open		(GUsbDevice	*device,
