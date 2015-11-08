@@ -38,6 +38,7 @@
 #include "gusb-util.h"
 #include "gusb-device.h"
 #include "gusb-device-private.h"
+#include "gusb-interface-private.h"
 
 /**
  * GUsbDevicePrivate:
@@ -490,11 +491,11 @@ g_usb_device_get_custom_index (GUsbDevice *device,
  *
  * Gets the interface number from the vendor class interface descriptor.
  *
- * Return value: an interface number, or 0xff for failure
+ * Return value: (transfer full): a #GUsbInterface or %NULL for not found
  *
- * Since: 0.2.5
+ * Since: 0.2.8
  **/
-guint8
+GUsbInterface *
 g_usb_device_get_interface (GUsbDevice *device,
 			    guint8      class_id,
 			    guint8      subclass_id,
@@ -503,7 +504,7 @@ g_usb_device_get_interface (GUsbDevice *device,
 {
 	const struct libusb_interface_descriptor *ifp;
 	gint rc;
-	guint8 iface_num = 0xff;
+	GUsbInterface *interface = NULL;
 	guint i;
 	struct libusb_config_descriptor *config;
 
@@ -520,12 +521,12 @@ g_usb_device_get_interface (GUsbDevice *device,
 			continue;
 		if (ifp->bInterfaceProtocol != protocol_id)
 			continue;
-		iface_num = ifp->bInterfaceNumber;
+		interface = _g_usb_interface_new (ifp);
 		break;
 	}
 
 	/* nothing matched */
-	if (iface_num == 0xff) {
+	if (interface == NULL) {
 		g_set_error (error,
 			     G_USB_DEVICE_ERROR,
 			     G_USB_DEVICE_ERROR_NOT_SUPPORTED,
@@ -535,53 +536,48 @@ g_usb_device_get_interface (GUsbDevice *device,
 	}
 
 	libusb_free_config_descriptor (config);
-	return iface_num;
+	return interface;
 }
 
 /**
- * g_usb_device_get_interface:
+ * g_usb_device_get_interfaces:
  * @device: a #GUsbDevice
- * @iface: an interface number
  * @error: a #GError, or %NULL
  *
- * Gets any extra data from the interface.
+ * Gets all the interfaces exported by the device.
  *
- * Return value: (transfer full): a #GBytes, or %NULL for failure
+ * Return value: (transfer container): an array of #GUsbInterface or %NULL for error
  *
- * Since: 0.2.5
+ * Since: 0.2.8
  **/
-GBytes *
-g_usb_device_get_interface_data (GUsbDevice *device, guint8 iface, GError **error)
+GPtrArray *
+g_usb_device_get_interfaces (GUsbDevice *device, GError **error)
 {
 	const struct libusb_interface_descriptor *ifp;
 	gint rc;
 	guint i;
-	GBytes *bytes = NULL;
+	guint j;
 	struct libusb_config_descriptor *config;
+	GPtrArray *array = NULL;
 
 	rc = libusb_get_active_config_descriptor (device->priv->device, &config);
 	if (!g_usb_device_libusb_error_to_gerror (device, rc, error))
 		return NULL;
 
-	/* find the right data */
+	/* get all interfaces */
+	array = g_ptr_array_new_with_free_func ((GDestroyNotify) g_object_unref);
 	for (i = 0; i < config->bNumInterfaces; i++) {
-		ifp = &config->interface[i].altsetting[0];
-		if (iface == ifp->bInterfaceNumber) {
-			bytes = g_bytes_new (config->extra, config->extra_length);
-			break;
+		GUsbInterface *interface = NULL;
+		for (j = 0; j < (guint) config->interface[i].num_altsetting; j++) {
+			ifp = &config->interface[i].altsetting[j];
+			interface = _g_usb_interface_new (ifp);
+			g_ptr_array_add (array, interface);
 		}
-	}
-
-	/* nothing matched */
-	if (bytes == NULL) {
-		g_set_error (error,
-			     G_USB_DEVICE_ERROR,
-			     G_USB_DEVICE_ERROR_NOT_SUPPORTED,
-			     "no interface 0x%02x", iface);
+		break;
 	}
 
 	libusb_free_config_descriptor (config);
-	return bytes;
+	return array;
 }
 
 /**
@@ -802,6 +798,40 @@ g_usb_device_release_interface (GUsbDevice                     *device,
 			return g_usb_device_libusb_error_to_gerror (device, rc,
 								    error);
 	}
+
+	return TRUE;
+}
+
+/**
+ * g_usb_device_set_interface_alt:
+ * @device: a #GUsbDevice
+ * @interface: bInterfaceNumber of the interface you wish to release
+ * @alt: alternative setting number
+ * @error: a #GError, or %NULL
+ *
+ * Sets an alternate setting on an interface.
+ *
+ * Return value: %TRUE on success
+ *
+ * Since: 0.2.8
+ **/
+gboolean
+g_usb_device_set_interface_alt (GUsbDevice                     *device,
+                                gint                            interface,
+                                gint                            alt,
+                                GError                        **error)
+{
+	gint rc;
+
+	g_return_val_if_fail (G_USB_IS_DEVICE (device), FALSE);
+	g_return_val_if_fail (error == NULL || *error == NULL, FALSE);
+
+	if (device->priv->handle == NULL)
+		return g_usb_device_not_open_error (device, error);
+
+	rc = libusb_set_interface_alt_setting (device->priv->handle, interface, alt);
+	if (rc != LIBUSB_SUCCESS)
+		return g_usb_device_libusb_error_to_gerror (device, rc, error);
 
 	return TRUE;
 }
@@ -1654,6 +1684,24 @@ g_usb_device_get_pid (GUsbDevice *device)
 	g_return_val_if_fail (G_USB_IS_DEVICE (device), 0);
 
 	return device->priv->desc.idProduct;
+}
+
+/**
+ * g_usb_device_get_version_bcd:
+ * @device: a #GUsbDevice
+ *
+ * Gets the BCD firmware version number for the device.
+ *
+ * Return value: a version number in BCD format.
+ *
+ * Since: 0.2.8
+ **/
+guint16
+g_usb_device_get_version_bcd (GUsbDevice *device)
+{
+	g_return_val_if_fail (G_USB_IS_DEVICE (device), 0);
+
+	return device->priv->desc.bcdDevice;
 }
 
 /**

@@ -26,6 +26,7 @@
 #include <gio/gio.h>
 
 #include <gusb/gusb-util.h>
+#include <gusb/gusb-interface.h>
 
 G_BEGIN_DECLS
 
@@ -159,6 +160,7 @@ guint8			 g_usb_device_get_port_number	(GUsbDevice	*device);
 
 guint16			 g_usb_device_get_vid		(GUsbDevice	*device);
 guint16			 g_usb_device_get_pid		(GUsbDevice	*device);
+guint16			 g_usb_device_get_version_bcd	(GUsbDevice	*device);
 const gchar		*g_usb_device_get_vid_as_str	(GUsbDevice	*device);
 const gchar		*g_usb_device_get_pid_as_str	(GUsbDevice	*device);
 guint8			 g_usb_device_get_device_class	(GUsbDevice	*device);
@@ -174,13 +176,12 @@ guint8			 g_usb_device_get_custom_index	(GUsbDevice	*device,
 							 guint8		 protocol_id,
 							 GError		**error);
 
-guint8			 g_usb_device_get_interface	(GUsbDevice	*device,
+GUsbInterface		*g_usb_device_get_interface	(GUsbDevice	*device,
 							 guint8		 class_id,
 							 guint8		 subclass_id,
 							 guint8		 protocol_id,
 							 GError		**error);
-GBytes			*g_usb_device_get_interface_data (GUsbDevice	*device,
-							 guint8		 iface,
+GPtrArray		*g_usb_device_get_interfaces	(GUsbDevice	*device,
 							 GError		**error);
 
 gboolean		 g_usb_device_open		(GUsbDevice	*device,
@@ -204,6 +205,10 @@ gboolean		 g_usb_device_claim_interface	(GUsbDevice	*device,
 gboolean		 g_usb_device_release_interface	(GUsbDevice	*device,
 							 gint		 interface,
 							 GUsbDeviceClaimInterfaceFlags flags,
+							 GError		**error);
+gboolean		 g_usb_device_set_interface_alt	(GUsbDevice	*device,
+							 gint		 interface,
+							 gint		 alt,
 							 GError		**error);
 
 gchar			*g_usb_device_get_string_descriptor (GUsbDevice *device,
